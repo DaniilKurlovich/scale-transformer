@@ -1,0 +1,50 @@
+[project]
+name = "scale-transformer"
+version = "0.1.0"
+description = "Single-device SFT baseline for Qwen3-30B-A3B on Hugging Face Transformers"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "torch>=2.6",
+    "transformers>=5.0,<6",
+    "datasets>=3.0",
+    "accelerate>=1.2",
+    "peft>=0.14",
+    "pyyaml>=6.0",
+    "safetensors>=0.4",
+    "sentencepiece>=0.2",
+]
+
+[project.optional-dependencies]
+# 4-bit QLoRA. Linux/CUDA only -- bitsandbytes has no usable macOS wheel.
+quant = ["bitsandbytes>=0.45; sys_platform == 'linux'"]
+# Experiment tracking.
+track = ["tensorboard>=2.16", "wandb>=0.18"]
+dev = ["ruff>=0.7", "pytest>=8.0"]
+
+[project.scripts]
+scale-train = "scale_transformer.cli:main"
+scale-merge = "scale_transformer.merge:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scale_transformer"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.uv]
+# flash-attn needs a compiler + CUDA toolkit and is never installed by default.
+# On a GPU box:  uv pip install flash-attn --no-build-isolation
+package = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,36 @@
+# 4-bit QLoRA variant: ~18 GB of weights, so Qwen3-30B-A3B trains on a single 24-48 GB card.
+# Needs `uv sync --extra quant` (bitsandbytes, Linux/CUDA only).
+
+model:
+  name_or_path: Qwen/Qwen3-30B-A3B
+  dtype: bfloat16
+  attn_implementation: sdpa
+  gradient_checkpointing: true
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  output_router_logits: true
+  router_aux_loss_coef: 0.001
+
+lora:
+  enabled: true
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+
+data:
+  dataset_name: tatsu-lab/alpaca
+  format: alpaca
+  max_seq_len: 1024
+  enable_thinking: false
+
+train:
+  output_dir: outputs/qwen3-30b-a3b-qlora
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 1.0e-4
+  bf16: true
+  optim: paged_adamw_8bit
+  save_steps: 200
+  eval_steps: 200

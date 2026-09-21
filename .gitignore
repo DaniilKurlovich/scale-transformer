@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Training artifacts
+outputs/
+runs/
+wandb/
+checkpoints/
+*.safetensors
+*.bin
+
+# HF caches (in case HF_HOME is pointed into the repo)
+.cache/
+hf_cache/
+
+# Local env / editors
+.env
+.DS_Store
+.idea/
+.vscode/
