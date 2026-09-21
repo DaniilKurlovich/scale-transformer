@@ -55,6 +55,7 @@ RUN set -eux; \
         curl \
         git \
         openssh-client \
+        openssh-server \
         build-essential \
         ninja-build \
         numactl \
@@ -131,6 +132,17 @@ RUN mkdir -p /cache/huggingface /cache/triton
 RUN nvcc --version && ldconfig -p | grep -q libnccl.so
 RUN python -c "import torch, transformers; print('torch', torch.__version__, '/ cuda', torch.version.cuda); print('transformers', transformers.__version__)"
 
+# SSH server config. Key-only root login: RunPod injects your public key as
+# PUBLIC_KEY and the entrypoint installs it. Nothing listens unless that
+# variable is set, so this is inert for local `docker run`.
+RUN set -eux; \
+    sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config; \
+    sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config; \
+    mkdir -p /var/run/sshd
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/bin/bash"]
 
 
