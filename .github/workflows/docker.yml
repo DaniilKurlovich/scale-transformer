@@ -57,8 +57,16 @@ jobs:
         include:
           - target: runtime
             suffix: ""
+            title: scale-transformer
+            description: >-
+              CUDA 13 training image for scale-transformer: nvcc, Nsight Systems
+              (nsys), system NCCL and the locked torch/transformers stack.
           - target: nccl-tests
             suffix: "-nccl"
+            title: scale-transformer-nccl
+            description: >-
+              The scale-transformer runtime image plus NVIDIA nccl-tests
+              (all_reduce_perf and friends) on PATH, for benchmarking collectives.
     steps:
       - uses: actions/checkout@v4
 
@@ -93,6 +101,10 @@ jobs:
       - name: Derive tags and labels
         id: meta
         uses: docker/metadata-action@v5
+        env:
+          # Default is manifest-only; index level is what a multi-arch push would
+          # carry, so emit both and stay correct if `platforms` ever grows.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ${{ steps.image.outputs.name }}
           flavor: |
@@ -105,6 +117,18 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
+          # metadata-action already derives created/revision/version and, from the
+          # repo, source/url/title/description. `source` is the one that makes
+          # GHCR link the package to this repo and inherit its visibility, so it
+          # is left alone. These override the rest: the repo-derived title and
+          # description are identical for both matrix legs, which would leave the
+          # two packages indistinguishable in the GHCR listing.
+          labels: |
+            org.opencontainers.image.title=${{ matrix.title }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+            org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}/blob/main/Dockerfile
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -114,7 +138,11 @@ jobs:
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
+          # Labels land in the image config, so every tag above that resolves to
+          # this image carries them. Annotations are the manifest-level copy that
+          # a registry can read without pulling the config blob.
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           # Registry cache rather than type=gha: the GitHub Actions cache caps
           # out at 10 GB per repo, which this image blows through immediately.
           cache-from: type=registry,ref=${{ steps.image.outputs.name }}:buildcache${{ matrix.suffix }}
