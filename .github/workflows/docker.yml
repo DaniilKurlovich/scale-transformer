@@ -58,15 +58,11 @@ jobs:
           - target: runtime
             suffix: ""
             title: scale-transformer
-            description: >-
-              CUDA 13 training image for scale-transformer: nvcc, Nsight Systems
-              (nsys), system NCCL and the locked torch/transformers stack.
+            description: CUDA 13 training image -- nvcc, nsys, NCCL, torch.
           - target: nccl-tests
             suffix: "-nccl"
             title: scale-transformer-nccl
-            description: >-
-              The scale-transformer runtime image plus NVIDIA nccl-tests
-              (all_reduce_perf and friends) on PATH, for benchmarking collectives.
+            description: Training image plus NVIDIA nccl-tests benchmarks.
     steps:
       - uses: actions/checkout@v4
 
@@ -116,10 +112,22 @@ jobs:
           # metadata-action already derives created/revision/version and, from the
           # repo, source/url/title/description. `source` is the one that makes
           # GHCR link the package to this repo and inherit its visibility, so it
-          # is left alone. These override the rest: the repo-derived title and
-          # description are identical for both matrix legs, which would leave the
-          # two packages indistinguishable in the GHCR listing.
+          # is left alone. These override the rest: the repo-derived title is the
+          # bare repo name for both matrix legs, and description/licenses come
+          # out empty (no repo description set, no LICENSE file detected).
+          #
+          # `labels` and `annotations` are separate inputs and custom labels do
+          # NOT feed the annotations output -- they have to be repeated. This
+          # matters because the GHCR package page reads the manifest annotations,
+          # not the config labels, so setting only `labels` leaves the published
+          # version page blank.
           labels: |
+            org.opencontainers.image.title=${{ matrix.title }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+            org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}/blob/main/Dockerfile
+          annotations: |
             org.opencontainers.image.title=${{ matrix.title }}
             org.opencontainers.image.description=${{ matrix.description }}
             org.opencontainers.image.licenses=Apache-2.0
@@ -134,9 +142,9 @@ jobs:
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
-          # Labels land in the image config, so every tag above that resolves to
-          # this image carries them. Annotations are the manifest-level copy that
-          # a registry can read without pulling the config blob.
+          # Labels land in the image config and annotations on the manifest. Both
+          # attach to the image, not to an individual tag, so every tag above
+          # that resolves to this digest shows the same metadata.
           #
           # Leave metadata-action at its default manifest-only annotation level.
           # Setting DOCKER_METADATA_ANNOTATIONS_LEVELS=manifest,index fails the
