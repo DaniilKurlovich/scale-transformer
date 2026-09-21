@@ -10,6 +10,7 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
+      - docker-entrypoint.sh
       - pyproject.toml
       - uv.lock
       - .python-version
@@ -18,6 +19,7 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
+      - docker-entrypoint.sh
       - pyproject.toml
       - uv.lock
       - .python-version
