@@ -23,3 +23,6 @@ hf_cache/
 .DS_Store
 .idea/
 .vscode/
+
+# Mutagen mirrors of the pod (see `mutagen sync list`)
+/workspace-ro/
