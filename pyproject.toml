@@ -1,7 +1,7 @@
 [project]
 name = "scale-transformer"
 version = "0.1.0"
-description = "Single-device SFT baseline for Qwen3-30B-A3B on Hugging Face Transformers"
+description = "Baseline for scaling fine-tune model Qwen3-30B-A3B"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = { text = "Apache-2.0" }
@@ -17,10 +17,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# 4-bit QLoRA. Linux/CUDA only -- bitsandbytes has no usable macOS wheel.
 quant = ["bitsandbytes>=0.45; sys_platform == 'linux'"]
-# Experiment tracking.
-track = ["tensorboard>=2.16", "wandb>=0.18"]
+track = ["tensorboard>=2.16"]
 dev = ["ruff>=0.7", "pytest>=8.0"]
 
 [project.scripts]
@@ -44,7 +42,12 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.uv]
 # flash-attn needs a compiler + CUDA toolkit and is never installed by default.
 # On a GPU box:  uv pip install flash-attn --no-build-isolation
-package = true
+#
+# Dependencies-only project: there is no source tree to install right now, so uv
+# resolves and installs the dependencies without building this package itself.
+# Restore src/ and flip this back to `true` to get the scale-train/scale-merge
+# entry points installed again.
+package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
