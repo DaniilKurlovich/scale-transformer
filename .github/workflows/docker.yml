@@ -101,10 +101,6 @@ jobs:
       - name: Derive tags and labels
         id: meta
         uses: docker/metadata-action@v5
-        env:
-          # Default is manifest-only; index level is what a multi-arch push would
-          # carry, so emit both and stay correct if `platforms` ever grows.
-          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ${{ steps.image.outputs.name }}
           flavor: |
@@ -141,6 +137,14 @@ jobs:
           # Labels land in the image config, so every tag above that resolves to
           # this image carries them. Annotations are the manifest-level copy that
           # a registry can read without pulling the config blob.
+          #
+          # Leave metadata-action at its default manifest-only annotation level.
+          # Setting DOCKER_METADATA_ANNOTATIONS_LEVELS=manifest,index fails the
+          # export here -- this is a single-platform build with provenance off,
+          # so there is no image index to annotate and BuildKit errors out with
+          # "index annotations not supported for single platform export" rather
+          # than ignoring them. Add the index level only alongside a second
+          # entry in `platforms`.
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           # Registry cache rather than type=gha: the GitHub Actions cache caps
