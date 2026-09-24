@@ -26,3 +26,7 @@ hf_cache/
 
 # Mutagen mirrors of the pod (see `mutagen sync list`)
 /workspace-ro/
+
+# HF assets (tokenizer, config.json, optionally the 61 GB of weights) -- see
+# README "Assets" for the download command
+assets/

@@ -1,0 +1,111 @@
+# Qwen3-30B-A3B + YaRN: stretch the 32k base model to 262k, then adapt the
+# weights to the stretched frequencies on long PG-19 documents.
+# Run:  torchrun --nproc_per_node=8 -m scale_transformer.train --job.config_file configs/qwen3_30b_a3b_yarn.toml
+# (scale_transformer.train, not torchtitan.train: the flavor is registered in scale_transformer/yarn.py.)
+# Afterwards, stamp the export so inference uses the same scaling:
+#   python -m scale_transformer.yarn --stamp outputs/yarn/checkpoint/step-500 --factor 8
+
+[job]
+custom_config_module = "scale_transformer.nsys_profile"   # adds the [nsys] section below
+dump_folder = "./outputs/yarn"
+description = "Qwen3-30B-A3B YaRN long-context continued pretraining"
+print_config = true
+
+[model]
+name = "qwen3"
+flavor = "30B-A3B-yarn"          # YaRN factor 8: 32768 -> 262144, see scale_transformer/yarn.py
+# tokenizer.json / config.json + weights from Qwen/Qwen3-30B-A3B-Base.
+# Base, not the instruct repo: its eos is <|endoftext|>, which is what the
+# dataloader appends between PG-19 documents.
+hf_assets_path = "./assets/qwen3-30b-a3b-base"
+
+[training]
+dataset = "pg19"               # emozilla/pg19; registered in scale_transformer/pg19.py
+dataset_path = "./data/pg19"   # local parquet mirror; fetch_assets/train.sh download it here (drop to stream from the Hub)
+local_batch_size = 1           # per-GPU micro-batch
+global_batch_size = 8          # 8 x 32768 = 262k tokens/step
+seq_len = 32768                # one YaRN-scaled chunk; raise with context_parallel_degree
+max_norm = 1.0
+steps = 500                    # ~130B tokens is overkill; long-context adaptation converges fast
+mixed_precision_param = "bfloat16"
+mixed_precision_reduce = "float32"
+gc_freq = 50
+
+[training.dataloader]
+num_workers = 4
+pin_memory = true
+persistent_workers = true
+
+[optimizer]
+name = "AdamW"
+lr = 1e-5                      # continued pretraining from Base weights; use 3e-4 when training from scratch
+eps = 1e-8
+weight_decay = 0.1
+implementation = "fused"
+
+[lr_scheduler]
+warmup_steps = 20              # short warmup: the weights are already trained
+decay_type = "cosine"
+min_lr_factor = 0.1
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1   # -1 = fill remaining world size with FSDP sharding
+tensor_parallel_degree = 1
+context_parallel_degree = 1       # raise to shard the 32k sequence if activations don't fit
+pipeline_parallel_degree = 1
+expert_parallel_degree = 8        # shard the 128 experts across the 8 GPUs (a2a dispatch)
+expert_tensor_parallel_degree = 1
+
+[activation_checkpoint]
+mode = "full"                     # "selective" + selective_ac_option="2" once memory allows
+
+[compile]
+enable = true
+components = ["model", "loss"]
+
+[checkpoint]
+enable = true
+folder = "checkpoint"
+interval = 200
+keep_latest_k = 3
+last_save_model_only = true
+last_save_in_hf = true              # export safetensors; config.json/tokenizer are NOT copied -- see `python -m scale_transformer.yarn --stamp`
+export_dtype = "bfloat16"
+async_mode = "disabled"
+# --- continued pretraining from the released HF weights ---
+initial_load_path = "./assets/qwen3-30b-a3b-base"   # folder with *.safetensors + index.json
+initial_load_in_hf = true
+initial_load_model_only = true      # weights only: no optimizer/LR state, step counter restarts
+
+[metrics]
+log_freq = 10
+enable_tensorboard = true
+save_tb_folder = "tb"
+
+[profiling]
+enable_profiling = true            # torch.profiler -> outputs/profile_traces/iteration_<step>/rank<r>_trace.json (chrome trace)
+save_traces_folder = "profile_traces"
+profile_freq = 100                 # one profiled window every 100 steps
+profiler_warmup = 3
+profiler_active = 1
+enable_memory_snapshot = false
+
+[validation]
+enable = false
+dataset = "pg19_validation"    # default is "c4_validation" -- set this or you validate on the wrong corpus
+dataset_path = "./data/pg19"   # same mirror; the validation-* shards are fetched alongside train-*
+# freq = 200                   # validate every N steps (plus step 1)
+# steps = 20                   # keep > 0; -1 (consume the whole split) can hang on rank mismatch
+# seq_len = 4096
+# local_batch_size = 1
+
+[debug]
+seed = 42
+
+[nsys]                            # rank-0 Nsight Systems capture; see scale_transformer/nsys_profile.py + run_nsys.sh
+enable = false                    # run_nsys.sh flips this on via --nsys.enable
+start_step = 5                    # inclusive; skip warmup + torch.compile
+stop_step = 8                     # inclusive
+rank = 0
+stop_training_after_capture = false

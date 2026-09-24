@@ -35,6 +35,18 @@ if [ -n "${PUBLIC_KEY:-}" ]; then
 
     mkdir -p /var/run/sshd
 
+    # AUTO_TRAIN=1: kick off the training job now, in the background, so a pod
+    # trains from the moment it is deployed. sshd stays the foreground process
+    # (below), which keeps the pod up after the job ends; the job's output is in
+    # /workspace/outputs/logs. TRAIN_CONFIG and TRAIN_ARGS are passed through.
+    if [ "${AUTO_TRAIN:-0}" = 1 ] && { [ "$#" -eq 0 ] || [ "$*" = "/bin/bash" ]; }; then
+        mkdir -p /workspace/outputs/logs
+        echo "entrypoint: AUTO_TRAIN=1 -- starting train.sh ${TRAIN_CONFIG:-} ${TRAIN_ARGS:-}" >&2
+        # shellcheck disable=SC2086  # TRAIN_ARGS is a list of CLI overrides
+        nohup train.sh ${TRAIN_CONFIG:-} ${TRAIN_ARGS:-} \
+            >>/workspace/outputs/logs/auto_train.out 2>&1 &
+    fi
+
     # sshd has to be the foreground process. The default CMD is an interactive
     # bash, which on a pod has no TTY and no stdin: it reads EOF, exits, takes
     # PID 1 with it and the pod restart-loops. An explicit command (docker run
@@ -48,6 +60,12 @@ fi
 # Same trap without a key: an interactive bash with nothing on stdin exits at
 # once and restart-loops the pod. Locally there is a TTY and this is skipped.
 if { [ "$#" -eq 0 ] || [ "$*" = "/bin/bash" ]; } && [ ! -t 0 ]; then
+    if [ "${AUTO_TRAIN:-0}" = 1 ]; then
+        # No ssh, but still train: the job is the foreground process and its
+        # exit code is the container's.
+        # shellcheck disable=SC2086
+        exec train.sh ${TRAIN_CONFIG:-} ${TRAIN_ARGS:-}
+    fi
     echo "entrypoint: PUBLIC_KEY unset -- no sshd. Add an SSH key in your RunPod" >&2
     echo "entrypoint: account settings and redeploy. Idling to keep the pod up." >&2
     exec sleep infinity

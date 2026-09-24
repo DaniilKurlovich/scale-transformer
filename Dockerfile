@@ -5,12 +5,33 @@
 #   Build:      DOCKER_BUILDKIT=1 docker build -t scale-transformer .
 #   With tests: DOCKER_BUILDKIT=1 docker build --target nccl-tests -t scale-transformer:nccl .
 #
-#   Run:        docker run --rm -it --gpus all \
+#   Shell:      docker run --rm -it --gpus all \
 #                 --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 \
-#                 -v "$PWD":/workspace -v hf-cache:/cache/huggingface \
-#                 scale-transformer
+#                 -v scale-workspace:/workspace scale-transformer
+#
+#   Train:      docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 \
+#                 -v scale-workspace:/workspace scale-transformer \
+#                 train.sh configs/qwen3_30b_a3b.toml
+#               train.sh fetches the tokenizer/config (and weights, dataset) the
+#               config refers to into /workspace if they are not there yet, then
+#               runs torchrun. Checkpoints, tensorboard, profiler traces, nsys
+#               reports and logs all land under /workspace/outputs.
+#
+#   2 nodes:    same command on both nodes with -e NNODES=2 -e NODE_RANK=0|1
+#               -e MASTER_ADDR=<node 0> (and --network host or equivalent).
+#
+#   RunPod:     set AUTO_TRAIN=1 (plus NNODES/NODE_RANK/MASTER_ADDR and PUBLIC_KEY)
+#               in the pod template: the entrypoint starts train.sh in the
+#               background and keeps sshd in the foreground, so the job starts
+#               on deploy and the pod stays up for you to ssh in and look.
 #
 #   Profile:    add --cap-add=SYS_ADMIN  (nsys needs it for CPU/GPU sampling counters)
+#               and NSYS=1 to run the job under run_nsys.sh
+#
+# /workspace is a volume: the persistent disk on RunPod, a named volume locally.
+# The code is baked into /opt/scale-transformer, not /workspace, precisely so
+# that mounting the volume does not hide it. A checkout synced over /workspace
+# (mutagen, bind mount) still wins: train.sh puts its src/ first on PYTHONPATH.
 #
 # Note: nccl-tests links against the system NCCL that the CUDA base image ships
 # pinned (the build log prints its version). torch loads its own bundled
@@ -103,34 +124,51 @@ RUN set -eux; \
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 
-# The venv lives outside /workspace on purpose: bind-mounting your checkout over
-# /workspace would otherwise shadow it and the image's dependencies would vanish.
+# The venv and the code both live outside /workspace on purpose: the volume
+# mounted there (or a checkout bind-mounted over it) must not shadow them.
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_PYTHON=3.12 \
     UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     PATH=/opt/venv/bin:$PATH
 
-WORKDIR /workspace
+WORKDIR /opt/scale-transformer
 
 # Dependencies resolve from the lockfile alone, so this layer is cached until
-# pyproject.toml or uv.lock actually change.
-COPY pyproject.toml uv.lock .python-version ./
+# pyproject.toml or uv.lock actually change. The project itself is skipped here
+# and installed in the next step, once its source is in the image.
+COPY pyproject.toml uv.lock .python-version README.md ./
 
 ARG UV_EXTRAS="--extra quant --extra track"
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked ${UV_EXTRAS}
+    uv sync --locked --no-install-project ${UV_EXTRAS}
 
-# Model and dataset caches belong on a volume, not in the image layers --
-# Qwen3-30B-A3B alone is ~61 GB of weights.
-ENV HF_HOME=/cache/huggingface \
-    TRITON_CACHE_DIR=/cache/triton
-RUN mkdir -p /cache/huggingface /cache/triton
+# The package is installed editable from /opt/scale-transformer/src, and the
+# configs and launch scripts sit next to it, so a bare volume on /workspace is
+# enough to train. train.sh prefers a checkout synced over /workspace when
+# there is one.
+COPY src ./src
+COPY configs ./configs
+COPY run_nsys.sh train.sh ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked ${UV_EXTRAS} \
+    && ln -s /opt/scale-transformer/train.sh /usr/local/bin/train.sh \
+    && ln -s /opt/scale-transformer/run_nsys.sh /usr/local/bin/run_nsys.sh
+
+# Everything a run reads or writes goes under /workspace, the volume: the HF
+# cache (streamed datasets, Hub metadata), assets/ (tokenizer, config.json, the
+# ~61 GB of weights for continued pretraining), data/ (the PG-19 parquet
+# mirror) and outputs/ (checkpoints, tensorboard, profiler traces, nsys, logs).
+ENV HF_HOME=/workspace/.cache/huggingface \
+    TRITON_CACHE_DIR=/workspace/.cache/triton
+WORKDIR /workspace
 
 # Fail the build early if the toolchain is not what we think it is. Builders
 # usually have no GPU, so none of this may initialise CUDA or touch a device.
 RUN nvcc --version && ldconfig -p | grep -q libnccl.so
 RUN python -c "import torch, transformers; print('torch', torch.__version__, '/ cuda', torch.version.cuda); print('transformers', transformers.__version__)"
+RUN python -c "import scale_transformer.train, scale_transformer.fetch_assets" \
+    && python -m scale_transformer.fetch_assets --config /opt/scale-transformer/configs/qwen3_30b_a3b.toml --dry-run
 
 # SSH server config. Key-only root login: RunPod injects your public key as
 # PUBLIC_KEY and the entrypoint installs it. Nothing listens unless that

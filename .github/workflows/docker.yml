@@ -11,6 +11,11 @@ on:
       - Dockerfile
       - .dockerignore
       - docker-entrypoint.sh
+      - train.sh
+      - run_nsys.sh
+      - src/**
+      - configs/**
+      - README.md
       - pyproject.toml
       - uv.lock
       - .python-version
@@ -20,6 +25,11 @@ on:
       - Dockerfile
       - .dockerignore
       - docker-entrypoint.sh
+      - train.sh
+      - run_nsys.sh
+      - src/**
+      - configs/**
+      - README.md
       - pyproject.toml
       - uv.lock
       - .python-version

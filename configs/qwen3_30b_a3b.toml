@@ -1,0 +1,97 @@
+# Qwen3-30B-A3B (MoE: 48 layers, 128 experts, top-8, ~3B active params)
+# Target: 1 node x 8 GPUs @ 80GB (H100/H200). See README for scaling notes.
+# Run:  torchrun --nproc_per_node=8 -m scale_transformer.train --job.config_file configs/qwen3_30b_a3b.toml
+
+[job]
+dump_folder = "./outputs"
+description = "Qwen3-30B-A3B training"
+print_config = true
+
+[model]
+name = "qwen3"
+flavor = "30B-A3B"
+# tokenizer.json / config.json downloaded from Qwen/Qwen3-30B-A3B
+hf_assets_path = "./assets/qwen3-30b-a3b"
+
+[training]
+dataset = "pg19"               # emozilla/pg19; registered in scale_transformer/pg19.py
+dataset_path = "./data/pg19"   # local parquet mirror; fetch_assets/train.sh download it here (drop to stream from the Hub)
+local_batch_size = 1           # per-GPU micro-batch
+global_batch_size = 64         # -> grad accumulation = 64 / (1 * dp_degree)
+seq_len = 4096                 # flavor allows up to 262144; start small
+max_norm = 1.0
+steps = 1000
+mixed_precision_param = "bfloat16"
+mixed_precision_reduce = "float32"
+gc_freq = 50
+
+[training.dataloader]
+num_workers = 4
+pin_memory = true
+persistent_workers = true
+
+[optimizer]
+name = "AdamW"
+lr = 3e-4                      # lower (1e-5..5e-5) for continued pretraining from released weights
+eps = 1e-8
+weight_decay = 0.1
+implementation = "fused"
+
+[lr_scheduler]
+warmup_steps = 100
+decay_type = "cosine"
+min_lr_factor = 0.1
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1   # -1 = fill remaining world size with FSDP sharding
+tensor_parallel_degree = 1
+context_parallel_degree = 1
+pipeline_parallel_degree = 1
+expert_parallel_degree = 8        # shard the 128 experts across the 8 GPUs (a2a dispatch)
+expert_tensor_parallel_degree = 1
+
+[activation_checkpoint]
+mode = "full"                     # "selective" + selective_ac_option="2" once memory allows
+
+[compile]
+enable = true
+components = ["model", "loss"]
+
+[checkpoint]
+enable = true
+folder = "checkpoint"
+interval = 200
+keep_latest_k = 3
+last_save_model_only = true
+export_dtype = "bfloat16"
+async_mode = "disabled"
+# --- continued pretraining from the released HF weights ---
+# initial_load_path = "./assets/qwen3-30b-a3b"   # folder with *.safetensors + index.json
+# initial_load_in_hf = true
+# initial_load_model_only = true
+
+[metrics]
+log_freq = 10
+enable_tensorboard = true
+save_tb_folder = "tb"
+
+[profiling]
+enable_profiling = true            # torch.profiler -> outputs/profile_traces/iteration_<step>/rank<r>_trace.json (chrome trace)
+save_traces_folder = "profile_traces"
+profile_freq = 100                 # one profiled window every 100 steps
+profiler_warmup = 3
+profiler_active = 1
+enable_memory_snapshot = false
+
+[validation]
+enable = false
+dataset = "pg19_validation"    # default is "c4_validation" -- set this or you validate on the wrong corpus
+dataset_path = "./data/pg19"   # same mirror; the validation-* shards are fetched alongside train-*
+# freq = 200                   # validate every N steps (plus step 1)
+# steps = 20                   # keep > 0; -1 (consume the whole split) can hang on rank mismatch
+# seq_len = 4096
+# local_batch_size = 1
+
+[debug]
+seed = 42

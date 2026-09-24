@@ -1,0 +1,45 @@
+# Smoke test: same qwen3 MoE code path (router + grouped experts + real Qwen3 tokenizer)
+# at a size that fits one 48GB GPU. Use it to validate data/tokenizer/trainer wiring
+# before booking the multi-GPU run.
+# Run:  torchrun --nproc_per_node=1 -m scale_transformer.train --job.config_file configs/qwen3_smoke_1gpu.toml
+
+[job]
+dump_folder = "./outputs/smoke"
+description = "Qwen3-MoE smoke test"
+print_config = false
+
+[model]
+name = "qwen3"
+flavor = "smoke-moe"          # registered in scale_transformer/smoke.py
+hf_assets_path = "./assets/qwen3-30b-a3b"
+
+[training]
+dataset = "pg19"
+local_batch_size = 2
+seq_len = 1024
+steps = 10
+mixed_precision_param = "bfloat16"
+
+[optimizer]
+name = "AdamW"
+lr = 1e-4
+implementation = "fused"
+
+[lr_scheduler]
+warmup_steps = 2
+
+[parallelism]
+data_parallel_shard_degree = -1
+
+[activation_checkpoint]
+mode = "full"
+
+[metrics]
+log_freq = 1
+
+[checkpoint]
+enable = false
+
+[debug]
+seed = 42
+moe_force_load_balance = true

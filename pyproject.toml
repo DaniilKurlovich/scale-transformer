@@ -23,8 +23,9 @@ track = ["tensorboard>=2.16"]
 dev = ["ruff>=0.7", "pytest>=8.0"]
 
 [project.scripts]
-scale-train = "scale_transformer.cli:main"
-scale-merge = "scale_transformer.merge:main"
+# Same main as `python -m scale_transformer.train`; torchrun needs a script or
+# module, so the usual launch is `torchrun ... -m scale_transformer.train`.
+scale-train = "scale_transformer.train:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -44,11 +45,10 @@ select = ["E", "F", "I", "UP", "B"]
 # flash-attn needs a compiler + CUDA toolkit and is never installed by default.
 # On a GPU box:  uv pip install flash-attn --no-build-isolation
 #
-# Dependencies-only project: there is no source tree to install right now, so uv
-# resolves and installs the dependencies without building this package itself.
-# Restore src/ and flip this back to `true` to get the scale-train/scale-merge
-# entry points installed again.
-package = false
+# `uv sync` installs src/scale_transformer as an editable package, so the
+# scale-train entry point and `-m scale_transformer.train` resolve.
+package = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-p no:cacheprovider -q"
